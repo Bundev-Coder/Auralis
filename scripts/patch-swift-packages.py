@@ -56,6 +56,14 @@ LEGACY_MACROS = """
 #ifndef EXLogError
 #define EXLogError(format, ...) NSLog((@"[Expo Error] " format), ##__VA_ARGS__)
 #endif
+
+#ifndef UMPromiseResolveBlock
+typedef EXPromiseResolveBlock UMPromiseResolveBlock;
+#endif
+
+#ifndef UMPromiseRejectBlock
+typedef EXPromiseRejectBlock UMPromiseRejectBlock;
+#endif
 """
 
 # 1. Patch Package.swift files for tools version and trailing commas
@@ -440,10 +448,12 @@ for m_path in [
 #import "EXEventEmitterService.h"
 #endif"""
             )
+            code_patched = code_patched.replace("UMPromiseResolveBlock", "EXPromiseResolveBlock")
+            code_patched = code_patched.replace("UMPromiseRejectBlock", "EXPromiseRejectBlock")
             if code_patched != code:
                 with open(m_path, "w", encoding="utf-8") as f:
                     f.write(code_patched)
-                print(f"Patched {m_path} with conditional EXEventEmitterService import")
+                print(f"Patched {m_path} with conditional EXEventEmitterService import and EXPromise types")
         except Exception as e:
             print(f"Error patching {m_path}: {e}")
 
