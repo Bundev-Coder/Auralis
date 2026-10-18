@@ -23,7 +23,7 @@ for p in glob.glob("node_modules/**/Package.swift", recursive=True):
 
 print(f"Total Swift packages patched: {count_pkg}")
 
-# 2. Patch Sendable conformance and 'weak let' -> 'weak var' in Swift source files
+# 2. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
 count_swift = 0
 for p in glob.glob("node_modules/**/*.swift", recursive=True):
     try:
@@ -36,12 +36,26 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
         code = re.sub(r"class\s+JavaScriptError\s*:\s*Error\s*,\s*Sendable", "class JavaScriptError: Error, @unchecked Sendable", code)
         code = re.sub(r"class\s+SharedObjectRegistry\s*:\s*Sendable", "class SharedObjectRegistry: @unchecked Sendable", code)
 
-        # Replace weak let runtime with nonisolated(unsafe) weak var
-        code = re.sub(r"private\s+weak\s+(let|var)\s+runtime\s*:\s*JavaScriptRuntime\?", "nonisolated(unsafe) private weak var runtime: JavaScriptRuntime?", code)
-        code = re.sub(r"private\s+weak\s+(let|var)\s+appContext\s*:\s*AppContext\?", "nonisolated(unsafe) private weak var appContext: AppContext?", code)
-
-        # Fallback for any other weak let
+        # Replace weak let with weak var
         code = re.sub(r"\bweak\s+let\b", "weak var", code)
+
+        # Fix Task+immediate.swift (Task.immediate and name: parameter only exist in Swift 6.2+)
+        if "Task+immediate.swift" in p:
+            code = re.sub(
+                r"if\s+#available\(.*?\)\s*\{[\s\S]*?\}\s*else\s*\{[\s\S]*?\}",
+                "return Task(priority: .high, operation: operation)",
+                code
+            )
+
+        # Fix JavaScriptRuntime.swift
+        if "JavaScriptRuntime.swift" in p:
+            # Fix C++ vector.push_back without consuming: label
+            code = code.replace("vector.push_back(consuming: propNameId)", "vector.push_back(propNameId)")
+            # Fix immortal reference constructor call via static factory
+            code = code.replace(
+                "expo.HostFunctionClosure(context, call, deallocate)",
+                "expo.HostFunctionClosure.create(context, call, deallocate)"
+            )
 
         if code != orig:
             with open(p, "w", encoding="utf-8") as f:
@@ -53,7 +67,24 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
 
 print(f"Total Swift source files patched: {count_swift}")
 
-# 3. Also remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
+# 3. Patch HostFunctionClosure.h to add static factory method for Swift C++ immortal reference
+hfc_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "Sources", "ExpoModulesJSI-Cxx", "include", "HostFunctionClosure.h")
+if os.path.exists(hfc_path):
+    try:
+        with open(hfc_path, "r", encoding="utf-8") as f:
+            hfc_code = f.read()
+        if "static HostFunctionClosure *_Nonnull create" not in hfc_code:
+            target = "explicit HostFunctionClosure(Context context, Closure closure, Deallocator deallocator) : RetainedSwiftPointer(context, deallocator), _closure(closure) {};"
+            replacement = target + "\n\n  static HostFunctionClosure *_Nonnull create(Context context, Closure closure, Deallocator deallocator) {\n    return new HostFunctionClosure(context, closure, deallocator);\n  }"
+            hfc_code_patched = hfc_code.replace(target, replacement)
+            if hfc_code_patched != hfc_code:
+                with open(hfc_path, "w", encoding="utf-8") as f:
+                    f.write(hfc_code_patched)
+                print("Patched HostFunctionClosure.h with static create factory method")
+    except Exception as e:
+        print(f"Error patching {hfc_path}: {e}")
+
+# 4. Remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
 bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
 if os.path.exists(bf_path):
     try:
