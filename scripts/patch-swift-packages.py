@@ -23,24 +23,35 @@ for p in glob.glob("node_modules/**/Package.swift", recursive=True):
 
 print(f"Total Swift packages patched: {count_pkg}")
 
-# 2. Patch all .swift source files replacing invalid 'weak let' with 'weak var'
-count_weak = 0
+# 2. Patch Sendable conformance and 'weak let' -> 'weak var' in Swift source files
+count_swift = 0
 for p in glob.glob("node_modules/**/*.swift", recursive=True):
     try:
         with open(p, "r", encoding="utf-8") as f:
             code = f.read()
         orig = code
-        # In Swift, weak properties must be mutable variables ('weak var')
+
+        # In Swift 6, classes with mutable stored properties cannot conform to Sendable without @unchecked
+        code = re.sub(r"class\s+JavaScriptCallback\s*:\s*Sendable", "class JavaScriptCallback: @unchecked Sendable", code)
+        code = re.sub(r"class\s+JavaScriptError\s*:\s*Error\s*,\s*Sendable", "class JavaScriptError: Error, @unchecked Sendable", code)
+        code = re.sub(r"class\s+SharedObjectRegistry\s*:\s*Sendable", "class SharedObjectRegistry: @unchecked Sendable", code)
+
+        # Replace weak let runtime with nonisolated(unsafe) weak var
+        code = re.sub(r"private\s+weak\s+(let|var)\s+runtime\s*:\s*JavaScriptRuntime\?", "nonisolated(unsafe) private weak var runtime: JavaScriptRuntime?", code)
+        code = re.sub(r"private\s+weak\s+(let|var)\s+appContext\s*:\s*AppContext\?", "nonisolated(unsafe) private weak var appContext: AppContext?", code)
+
+        # Fallback for any other weak let
         code = re.sub(r"\bweak\s+let\b", "weak var", code)
+
         if code != orig:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(code)
-            print(f"Patched 'weak let' -> 'weak var': {p}")
-            count_weak += 1
+            print(f"Patched Swift source file: {p}")
+            count_swift += 1
     except Exception as e:
         print(f"Error patching {p}: {e}")
 
-print(f"Total Swift source files patched for 'weak var': {count_weak}")
+print(f"Total Swift source files patched: {count_swift}")
 
 # 3. Also remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
 bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
