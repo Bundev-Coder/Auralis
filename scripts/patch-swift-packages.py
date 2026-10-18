@@ -67,7 +67,23 @@ inline void appendPropNameId(HostObjectCallbacks::PropNameIds &vec, facebook::js
     except Exception as e:
         print(f"Error patching {hoc_path}: {e}")
 
-# 4. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
+# 4. Patch JSIUtils.h errorFromValue to take const reference avoiding SILGen crash in Swift 6.1
+jsiu_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "Sources", "ExpoModulesJSI-Cxx", "include", "JSIUtils.h")
+if os.path.exists(jsiu_path):
+    try:
+        with open(jsiu_path, "r", encoding="utf-8") as f:
+            jsiu_code = f.read()
+        target = "inline jsi::JSError errorFromValue(jsi::IRuntime &runtime, jsi::Value value) {"
+        replacement = "inline jsi::JSError errorFromValue(jsi::IRuntime &runtime, const jsi::Value &value) {\n  return jsi::JSError(runtime, jsi::Value(runtime, value));\n}\ninline jsi::JSError _orig_errorFromValue(jsi::IRuntime &runtime, jsi::Value value) {"
+        if target in jsiu_code:
+            jsiu_code_patched = jsiu_code.replace(target, replacement)
+            with open(jsiu_path, "w", encoding="utf-8") as f:
+                f.write(jsiu_code_patched)
+            print("Patched JSIUtils.h errorFromValue to take const reference")
+    except Exception as e:
+        print(f"Error patching {jsiu_path}: {e}")
+
+# 5. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
 count_swift = 0
 for p in glob.glob("node_modules/**/*.swift", recursive=True):
     try:
@@ -109,6 +125,13 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
                 "expo.HostFunctionClosure.create(context, call, deallocate)"
             )
 
+        # Fix JavaScriptError.swift SILGen crash in Swift 6.1 (Xcode 16.4)
+        if "JavaScriptError.swift" in p:
+            code = code.replace(
+                "public init(_ runtime: JavaScriptRuntime, value: consuming JavaScriptValue)",
+                "public init(_ runtime: JavaScriptRuntime, value: borrowing JavaScriptValue)"
+            )
+
         if code != orig:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(code)
@@ -119,7 +142,7 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
 
 print(f"Total Swift source files patched: {count_swift}")
 
-# 5. Remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
+# 6. Remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
 bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
 if os.path.exists(bf_path):
     try:
