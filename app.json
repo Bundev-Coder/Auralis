@@ -52,7 +52,7 @@
       "expo-sqlite",
       "expo-secure-store",
       [
-        "expo-av",
+        "expo-audio",
         {
           "microphonePermission": false
         }

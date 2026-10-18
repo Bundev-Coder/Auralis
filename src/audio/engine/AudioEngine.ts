@@ -8,7 +8,8 @@ class AudioEngineClass {
   private static instance: AudioEngineClass;
 
   // Platform Audio Handles
-  private nativeSound: any = null;
+  private nativePlayer: any = null;
+  private playerSubscription: any = null;
   private webAudio: HTMLAudioElement | null = null;
   private webAudioContext: any = null;
   private webSourceNode: any = null;
@@ -46,7 +47,6 @@ class AudioEngineClass {
     return AudioEngineClass.instance;
   }
 
-  /**
   private isAudioModeReady = false;
 
   /**
@@ -56,15 +56,11 @@ class AudioEngineClass {
     if (this.isAudioModeReady) return;
     if (Platform.OS !== 'web') {
       try {
-        const { Audio, InterruptionModeIOS, InterruptionModeAndroid } = await import('expo-av');
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-          interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-          interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        const { setAudioModeAsync } = await import('expo-audio');
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionMode: 'doNotMix',
         });
         this.isAudioModeReady = true;
       } catch (err) {
@@ -221,42 +217,89 @@ class AudioEngineClass {
     }
   }
 
-  // ----------------- NATIVE AUDIO (EXPO-AV) -----------------
+  // ----------------- NATIVE AUDIO (EXPO-AUDIO) -----------------
 
-  private async loadNativeTrack(track: Track, autoPlay: boolean): Promise<void> {
-    const { Audio } = await import('expo-av');
-
-    // Ensure audio mode is initialized before loading sound
-    await this.initAudioMode();
-
-    // Unload previous sound instance to avoid duplicate instances
-    if (this.nativeSound) {
+  private cleanupNativePlayer() {
+    if (this.playerSubscription) {
       try {
-        await this.nativeSound.unloadAsync();
+        this.playerSubscription.remove();
       } catch {
         // ignore
       }
-      this.nativeSound = null;
+      this.playerSubscription = null;
     }
+    if (this.nativePlayer) {
+      try {
+        this.nativePlayer.pause();
+        if (typeof this.nativePlayer.clearLockScreenControls === 'function') {
+          this.nativePlayer.clearLockScreenControls();
+        }
+        if (typeof this.nativePlayer.remove === 'function') {
+          this.nativePlayer.remove();
+        }
+      } catch {
+        // ignore
+      }
+      this.nativePlayer = null;
+    }
+  }
 
+  private async loadNativeTrack(track: Track, autoPlay: boolean): Promise<void> {
     try {
-      const { sound } = await Audio.Sound.createAsync(
+      const { createAudioPlayer } = await import('expo-audio');
+
+      // Ensure audio mode is initialized before loading player
+      await this.initAudioMode();
+
+      // Clean up previous native player to avoid duplicate instances
+      this.cleanupNativePlayer();
+
+      const player = createAudioPlayer(
         { uri: track.sourceUri },
-        {
-          shouldPlay: autoPlay,
-          volume: this.volume,
-          rate: this.playbackRate,
-        },
-        this.onNativeStatusUpdate
+        { updateInterval: 250 }
       );
 
-      this.nativeSound = sound;
-      this.isPlaying = autoPlay;
+      this.nativePlayer = player;
+
+      // Listen for status updates
+      this.playerSubscription = player.addListener('playbackStatusUpdate', (status: any) => {
+        this.onNativeStatusUpdate(status);
+      });
+
+      // Apply initial volume & rate
+      try {
+        player.volume = this.volume;
+        player.playbackRate = this.playbackRate;
+      } catch {
+        // ignore
+      }
+
+      // Configure iOS / Android lock screen controls safely
+      try {
+        if (typeof player.setActiveForLockScreen === 'function') {
+          player.setActiveForLockScreen(true, {
+            title: track.title || 'Auralis Track',
+            artist: track.artist || 'Auralis Artist',
+            albumTitle: track.album || APP_CONFIG.appName,
+            artworkUrl: track.artworkUri || undefined,
+          });
+        }
+      } catch (e) {
+        console.warn('[AudioEngine] Lock screen config error:', e);
+      }
+
+      if (autoPlay) {
+        player.play();
+        this.isPlaying = true;
+      } else {
+        this.isPlaying = false;
+      }
+
       this.isBuffering = false;
       this.notifyState();
     } catch (err: any) {
       console.warn('[AudioEngine] loadNativeTrack error:', err);
-      this.nativeSound = null;
+      this.cleanupNativePlayer();
       this.error = err.message || 'Cannot load audio source';
       this.isPlaying = false;
       this.isBuffering = false;
@@ -265,21 +308,30 @@ class AudioEngineClass {
   }
 
   private onNativeStatusUpdate = (status: any) => {
-    if (!status.isLoaded) {
-      if (status.error) {
-        this.error = status.error;
-        this.isPlaying = false;
-        this.notifyState();
+    if (!status) return;
+
+    if (typeof status.isLoaded === 'boolean' && !status.isLoaded) {
+      if (status.reasonForWaitingToPlay) {
+        this.isBuffering = true;
       }
+      this.notifyState();
       return;
     }
 
-    this.isPlaying = status.isPlaying;
-    this.isBuffering = status.isBuffering;
-    this.positionSec = status.positionMillis / 1000;
-    this.durationSec = (status.durationMillis || 0) / 1000;
+    if (typeof status.playing === 'boolean') {
+      this.isPlaying = status.playing;
+    }
+    if (typeof status.isBuffering === 'boolean') {
+      this.isBuffering = status.isBuffering;
+    }
+    if (typeof status.currentTime === 'number' && Number.isFinite(status.currentTime)) {
+      this.positionSec = Math.max(0, status.currentTime);
+    }
+    if (typeof status.duration === 'number' && Number.isFinite(status.duration) && status.duration > 0) {
+      this.durationSec = status.duration;
+    }
 
-    if (status.didJustFinish && !status.isLooping) {
+    if (status.didJustFinish) {
       this.handleTrackEnded();
     } else {
       this.notifyState();
@@ -303,9 +355,9 @@ class AudioEngineClass {
         this.isPlaying = true;
         this.notifyState();
       }
-    } else if (this.nativeSound) {
+    } else if (this.nativePlayer) {
       try {
-        await this.nativeSound.playAsync();
+        this.nativePlayer.play();
         this.isPlaying = true;
         this.notifyState();
       } catch (e) {
@@ -326,9 +378,9 @@ class AudioEngineClass {
         this.isPlaying = false;
         this.notifyState();
       }
-    } else if (this.nativeSound) {
+    } else if (this.nativePlayer) {
       try {
-        await this.nativeSound.pauseAsync();
+        this.nativePlayer.pause();
         this.isPlaying = false;
         this.notifyState();
       } catch (e) {
@@ -352,9 +404,9 @@ class AudioEngineClass {
 
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.currentTime = clamped;
-    } else if (this.nativeSound) {
+    } else if (this.nativePlayer) {
       try {
-        await this.nativeSound.setPositionAsync(clamped * 1000);
+        await this.nativePlayer.seekTo(clamped);
       } catch (e) {
         console.warn('[AudioEngine] Native seek error:', e);
       }
@@ -370,9 +422,9 @@ class AudioEngineClass {
 
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.volume = clamped;
-    } else if (this.nativeSound) {
+    } else if (this.nativePlayer) {
       try {
-        await this.nativeSound.setVolumeAsync(clamped);
+        this.nativePlayer.volume = clamped;
       } catch (e) {
         console.warn('[AudioEngine] Native setVolume error:', e);
       }
@@ -386,9 +438,9 @@ class AudioEngineClass {
 
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.playbackRate = clamped;
-    } else if (this.nativeSound) {
+    } else if (this.nativePlayer) {
       try {
-        await this.nativeSound.setRateAsync(clamped, true);
+        this.nativePlayer.playbackRate = clamped;
       } catch (e) {
         console.warn('[AudioEngine] Native setRate error:', e);
       }
@@ -570,9 +622,7 @@ class AudioEngineClass {
       this.webAudio.pause();
       this.webAudio.src = '';
     }
-    if (this.nativeSound) {
-      this.nativeSound.unloadAsync();
-    }
+    this.cleanupNativePlayer();
     this.listeners.clear();
     this.trackEndListeners.clear();
   }

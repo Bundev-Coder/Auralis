@@ -14,7 +14,12 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
 
   if (!currentTrack) return null;
 
-  const progress = durationSec > 0 ? (positionSec / durationSec) * 100 : 0;
+  const rawProgress =
+    durationSec && Number.isFinite(durationSec) && durationSec > 0 && Number.isFinite(positionSec)
+      ? (positionSec / durationSec) * 100
+      : 0;
+  const progress = Math.max(0, Math.min(100, Number.isFinite(rawProgress) ? rawProgress : 0));
+  const progressPercent = `${progress.toFixed(2)}%` as any;
 
   return (
     <View style={styles.outerContainer}>
@@ -25,7 +30,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ onExpand }) => {
       >
         {/* Top Progress Line */}
         <View style={styles.progressBarTrack}>
-          <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+          <View style={[styles.progressBarFill, { width: progressPercent }]} />
         </View>
 
         <View style={styles.contentRow}>

@@ -16,7 +16,12 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   onSeek,
   showTimeLabels = true,
 }) => {
-  const progressRatio = durationSec > 0 ? Math.min(1, Math.max(0, positionSec / durationSec)) : 0;
+  const rawRatio =
+    durationSec && Number.isFinite(durationSec) && durationSec > 0 && Number.isFinite(positionSec)
+      ? positionSec / durationSec
+      : 0;
+  const progressRatio = Math.min(1, Math.max(0, Number.isFinite(rawRatio) ? rawRatio : 0));
+  const progressPercent = `${(progressRatio * 100).toFixed(2)}%` as any;
 
   const handlePress = (e: GestureResponderEvent) => {
     // Calculate seek position from tap layout
@@ -41,8 +46,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         }}
       >
         <View style={styles.track}>
-          <View style={[styles.fill, { width: `${progressRatio * 100}%` }]} />
-          <View style={[styles.thumb, { left: `${progressRatio * 100}%` }]} />
+          <View style={[styles.fill, { width: progressPercent }]} />
+          <View style={[styles.thumb, { left: progressPercent }]} />
         </View>
       </TouchableOpacity>
 
