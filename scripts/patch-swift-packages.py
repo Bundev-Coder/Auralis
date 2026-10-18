@@ -2,7 +2,8 @@ import os
 import glob
 import re
 
-count = 0
+# 1. Patch Package.swift files for tools version and trailing commas
+count_pkg = 0
 for p in glob.glob("node_modules/**/Package.swift", recursive=True):
     try:
         with open(p, "r", encoding="utf-8") as f:
@@ -15,14 +16,33 @@ for p in glob.glob("node_modules/**/Package.swift", recursive=True):
         if code != orig:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(code)
-            print(f"Patched: {p}")
-            count += 1
+            print(f"Patched Package.swift: {p}")
+            count_pkg += 1
     except Exception as e:
         print(f"Error patching {p}: {e}")
 
-print(f"Total Swift packages patched: {count}")
+print(f"Total Swift packages patched: {count_pkg}")
 
-# Also remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
+# 2. Patch all .swift source files replacing invalid 'weak let' with 'weak var'
+count_weak = 0
+for p in glob.glob("node_modules/**/*.swift", recursive=True):
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            code = f.read()
+        orig = code
+        # In Swift, weak properties must be mutable variables ('weak var')
+        code = re.sub(r"\bweak\s+let\b", "weak var", code)
+        if code != orig:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(code)
+            print(f"Patched 'weak let' -> 'weak var': {p}")
+            count_weak += 1
+    except Exception as e:
+        print(f"Error patching {p}: {e}")
+
+print(f"Total Swift source files patched for 'weak var': {count_weak}")
+
+# 3. Also remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
 bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
 if os.path.exists(bf_path):
     try:
