@@ -21,3 +21,17 @@ for p in glob.glob("node_modules/**/Package.swift", recursive=True):
         print(f"Error patching {p}: {e}")
 
 print(f"Total Swift packages patched: {count}")
+
+# Also remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
+bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
+if os.path.exists(bf_path):
+    try:
+        with open(bf_path, "r", encoding="utf-8") as f:
+            bf_code = f.read()
+        bf_code_patched = bf_code.replace("-quiet \\\n", "")
+        if bf_code_patched != bf_code:
+            with open(bf_path, "w", encoding="utf-8") as f:
+                f.write(bf_code_patched)
+            print(f"Patched build-xcframework.sh to remove -quiet")
+    except Exception as e:
+        print(f"Error patching {bf_path}: {e}")
