@@ -35,6 +35,29 @@ LEGACY_HEADERS = {
 """
 }
 
+# Legacy macros required by legacy modules (EXFatal, EXErrorWithMessage, EXLog*)
+LEGACY_MACROS = """
+#ifndef EXErrorWithMessage
+#define EXErrorWithMessage(msg) [NSError errorWithDomain:@"expo" code:0 userInfo:@{NSLocalizedDescriptionKey: (msg)}]
+#endif
+
+#ifndef EXFatal
+#define EXFatal(error) NSLog(@"[Expo Fatal Error] %@", (error))
+#endif
+
+#ifndef EXLogInfo
+#define EXLogInfo(format, ...) NSLog((@"[Expo Info] " format), ##__VA_ARGS__)
+#endif
+
+#ifndef EXLogWarn
+#define EXLogWarn(format, ...) NSLog((@"[Expo Warning] " format), ##__VA_ARGS__)
+#endif
+
+#ifndef EXLogError
+#define EXLogError(format, ...) NSLog((@"[Expo Error] " format), ##__VA_ARGS__)
+#endif
+"""
+
 # 1. Patch Package.swift files for tools version and trailing commas
 count_pkg = 0
 for p in glob.glob("node_modules/**/Package.swift", recursive=True):
@@ -117,7 +140,7 @@ if os.path.exists(jsiu_path):
         print(f"Error patching {jsiu_path}: {e}")
 
 # 5. Patch prebuilt XCFramework tarballs in node_modules to downgrade Swift 6.3 compiler requirement to 6.1,
-# replace unknown @_Concurrency.MainActor with @MainActor, and inject missing legacy Expo headers.
+# replace unknown @_Concurrency.MainActor with @MainActor, and inject missing legacy Expo headers & defines.
 count_tar = 0
 for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=True):
     try:
@@ -163,6 +186,13 @@ for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=Tru
                                 content = data.decode("utf-8", errors="ignore")
                                 if "EXEventEmitter.h" not in content:
                                     content += '\n#import <ExpoModulesCore/EXEventEmitter.h>\n#import <ExpoModulesCore/EXEventEmitterService.h>\n#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>\n'
+                                    data = content.encode("utf-8")
+                                    modified = True
+
+                            if member.name.endswith("EXDefines.h"):
+                                content = data.decode("utf-8", errors="ignore")
+                                if "EXErrorWithMessage" not in content:
+                                    content += LEGACY_MACROS
                                     data = content.encode("utf-8")
                                     modified = True
 
@@ -293,7 +323,7 @@ if os.path.exists(bf_path):
     except Exception as e:
         print(f"Error patching {bf_path}: {e}")
 
-# 9. Provide legacy Expo headers in expo-modules-core directories
+# 9. Provide legacy Expo headers & defines in expo-modules-core directories
 emc_dirs = [
     os.path.join("node_modules", "expo-modules-core", "ios"),
     os.path.join("node_modules", "expo-modules-core", "ios", "Legacy"),
@@ -312,7 +342,20 @@ for d in emc_dirs:
             except Exception as e:
                 print(f"Error writing {fpath}: {e}")
 
-# 10. Patch expo-av source files and provide fallback legacy headers
+exdef_path = os.path.join("node_modules", "expo-modules-core", "ios", "EXDefines.h")
+if os.path.exists(exdef_path):
+    try:
+        with open(exdef_path, "r", encoding="utf-8") as f:
+            exdef_code = f.read()
+        if "EXErrorWithMessage" not in exdef_code:
+            exdef_code += LEGACY_MACROS
+            with open(exdef_path, "w", encoding="utf-8") as f:
+                f.write(exdef_code)
+            print("Patched EXDefines.h with legacy macros")
+    except Exception as e:
+        print(f"Error patching {exdef_path}: {e}")
+
+# 10. Patch expo-av source files and provide fallback legacy headers & macros
 av_dirs = [
     os.path.join("node_modules", "expo-av", "ios", "EXAV"),
     os.path.join("node_modules", "expo-av", "ios", "EXAV", "Video"),
@@ -327,6 +370,37 @@ for d in av_dirs:
                 print(f"Wrote fallback header: {fpath}")
             except Exception as e:
                 print(f"Error writing {fpath}: {e}")
+
+# Inject legacy macros into expo-av ObjC sources
+exav_src_files = [
+    "EXAudioRecordingPermissionRequester.m",
+    "EXAudioRecordingPermissionRequester.h",
+    "EXAudioSessionManager.m",
+    "EXAV.m",
+    "EXAV.h",
+    "EXAVPlayerData.m",
+    "EXAVPlayerData.h",
+    "EXAVTV.m",
+]
+for fname in exav_src_files:
+    p = os.path.join("node_modules", "expo-av", "ios", "EXAV", fname)
+    if os.path.exists(p):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                code = f.read()
+            if "#define EXErrorWithMessage" not in code:
+                # Insert right after the first #import or at top
+                m = re.search(r"(#import[^\n]+\n)", code)
+                if m:
+                    idx = m.end()
+                    code = code[:idx] + LEGACY_MACROS + "\n" + code[idx:]
+                else:
+                    code = LEGACY_MACROS + "\n" + code
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(code)
+                print(f"Injected legacy macros into {p}")
+        except Exception as e:
+            print(f"Error injecting macros into {p}: {e}")
 
 # Patch EXAV.h
 exav_h = os.path.join("node_modules", "expo-av", "ios", "EXAV", "EXAV.h")
@@ -446,6 +520,19 @@ if os.path.exists("ios"):
                         with open(p, "w", encoding="utf-8") as hf:
                             hf.write(ucode)
                         print(f"Patched Pods ExpoModulesCore.h: {p}")
+                except Exception as e:
+                    print(f"Error patching {p}: {e}")
+
+            elif f == "EXDefines.h":
+                p = os.path.join(root, f)
+                try:
+                    with open(p, "r", encoding="utf-8") as hf:
+                        ucode = hf.read()
+                    if "EXErrorWithMessage" not in ucode:
+                        ucode += LEGACY_MACROS
+                        with open(p, "w", encoding="utf-8") as hf:
+                            hf.write(ucode)
+                        print(f"Patched Pods EXDefines.h: {p}")
                 except Exception as e:
                     print(f"Error patching {p}: {e}")
 
