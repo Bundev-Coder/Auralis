@@ -31,6 +31,7 @@ interface PlaylistStoreState {
   importLocalFiles: () => Promise<Track[]>;
   startDownload: (track: Track) => Promise<void>;
   removeDownload: (trackId: string) => Promise<void>;
+  addCustomTrack: (track: Track) => Promise<void>;
 }
 
 const localProvider = new LocalMusicProvider();
@@ -257,6 +258,13 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
   removeDownload: async (trackId: string) => {
     set((state) => ({
       downloads: state.downloads.filter((d) => d.trackId !== trackId),
+    }));
+  },
+
+  addCustomTrack: async (track: Track) => {
+    await dbInsertTrack(track);
+    set((state) => ({
+      allTracks: [track, ...state.allTracks.filter((t) => t.id !== track.id)],
     }));
   },
 }));

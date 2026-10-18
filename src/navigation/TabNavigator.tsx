@@ -5,6 +5,8 @@ import { HomeScreen } from '../features/home/HomeScreen';
 import { DiscoverScreen } from '../features/discover/DiscoverScreen';
 import { LibraryScreen } from '../features/library/LibraryScreen';
 import { AIAssistantScreen } from '../features/ai-assistant/AIAssistantScreen';
+import { MediaStudioScreen } from '../features/studio/MediaStudioScreen';
+import { OmniToolsScreen } from '../features/omnitools/OmniToolsScreen';
 import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { NowPlayingModal } from '../components/player/NowPlayingModal';
@@ -13,7 +15,7 @@ import { DownloadsModal } from '../components/downloads/DownloadsModal';
 import { ProfileModal } from '../components/profile/ProfileModal';
 import { darkColors, typography } from '../theme';
 
-export type TabKey = 'home' | 'discover' | 'library' | 'ai' | 'settings';
+export type TabKey = 'home' | 'library' | 'studio' | 'tools' | 'settings';
 
 export const TabNavigator: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('home');
@@ -30,16 +32,16 @@ export const TabNavigator: React.FC = () => {
             onOpenEqualizer={() => setShowEqualizer(true)}
             onOpenDownloads={() => setShowDownloads(true)}
             onOpenSettings={() => setActiveTab('settings')}
-            onNavigateToAI={() => setActiveTab('ai')}
+            onNavigateToAI={() => setActiveTab('studio')}
             onOpenProfile={() => setShowProfile(true)}
           />
         );
-      case 'discover':
-        return <DiscoverScreen />;
       case 'library':
         return <LibraryScreen />;
-      case 'ai':
-        return <AIAssistantScreen />;
+      case 'studio':
+        return <MediaStudioScreen />;
+      case 'tools':
+        return <OmniToolsScreen />;
       case 'settings':
         return (
           <SettingsScreen
@@ -52,10 +54,11 @@ export const TabNavigator: React.FC = () => {
   };
 
   const navItems = [
-    { key: 'home', label: 'Home', icon: 'home', iconOutline: 'home-outline' },
-    { key: 'discover', label: 'Discover', icon: 'compass', iconOutline: 'compass-outline' },
-    { key: 'library', label: 'Library', icon: 'library', iconOutline: 'library-outline' },
-    { key: 'ai', label: 'AI Music', icon: 'sparkles', iconOutline: 'sparkles-outline' },
+    { key: 'home', label: 'Trang Chủ', icon: 'musical-notes', iconOutline: 'musical-notes-outline' },
+    { key: 'library', label: 'Thư Viện', icon: 'library', iconOutline: 'library-outline' },
+    { key: 'studio', label: 'Media Studio', icon: 'film', iconOutline: 'film-outline' },
+    { key: 'tools', label: 'OmniTools', icon: 'apps', iconOutline: 'apps-outline' },
+    { key: 'settings', label: 'Cài Đặt', icon: 'settings', iconOutline: 'settings-outline' },
   ] as const;
 
   return (
