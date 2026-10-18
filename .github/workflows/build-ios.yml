@@ -24,14 +24,14 @@ jobs:
         run: npm install
 
       - name: Prebuild native iOS project
-        run: npx expo prebuild --platform ios --clean
+        run: npx expo prebuild --platform ios --clean --no-install
 
       - name: Setup CocoaPods
         run: |
           cd ios
           pod install
 
-      - name: Build iOS Archive & Package IPA
+      - name: Build iOS App without Signing
         run: |
           cd ios
           xcodebuild \
@@ -39,22 +39,19 @@ jobs:
             -scheme Auralis \
             -configuration Release \
             -sdk iphoneos \
-            -archivePath build/Auralis.xcarchive \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            archive
+            build
 
-          # Package Payload into unsigned .ipa for sideloading / AltStore / Sideloadly
-          mkdir -p build/Payload
-          cp -r build/Auralis.xcarchive/Products/Applications/Auralis.app build/Payload/
-          cd build
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/Auralis.app Payload/
           zip -r Auralis.ipa Payload
-          cd ..
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Auralis-iOS-IPA
-          path: ios/build/Auralis.ipa
+          path: ios/Auralis.ipa
           retention-days: 14
