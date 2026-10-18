@@ -548,4 +548,23 @@ if os.path.exists("ios"):
                 except Exception as e:
                     print(f"Error patching {p}: {e}")
 
+# Patch VideoViewModule.swift to bypass legacyResolver / legacyRejecter getters
+for vvm_path in [
+    os.path.join("node_modules", "expo-av", "ios", "EXAV", "Video", "VideoViewModule.swift"),
+    os.path.join("ios", "Pods", "EXAV", "Video", "VideoViewModule.swift"),
+]:
+    if os.path.exists(vvm_path):
+        try:
+            with open(vvm_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            old_call = "view.contentView.setFullscreen(value, resolver: promise.legacyResolver, rejecter: promise.legacyRejecter)"
+            new_call = 'view.contentView.setFullscreen(value, resolver: { res in promise.resolve(res) }, rejecter: { code, desc, _ in promise.reject(code ?? "ERR", desc ?? "") })'
+            if old_call in code:
+                code = code.replace(old_call, new_call)
+                with open(vvm_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                print(f"Patched {vvm_path} to direct promise closures")
+        except Exception as e:
+            print(f"Error patching {vvm_path}: {e}")
+
 print("=== Patching completed successfully ===")
