@@ -265,6 +265,10 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
                 "public init(_ runtime: JavaScriptRuntime, value: borrowing JavaScriptValue)"
             )
 
+        # Fix VideoViewModule.swift promise.resolver -> promise.legacyResolver
+        if "VideoViewModule.swift" in p:
+            code = code.replace("resolver: promise.resolver", "resolver: promise.legacyResolver")
+
         if code != orig:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(code)
@@ -389,6 +393,20 @@ if os.path.exists(vv_h):
             print("Patched EXVideoView.h with conditional EXLegacyExpoViewProtocol import")
     except Exception as e:
         print(f"Error patching {vv_h}: {e}")
+
+# Patch VideoViewModule.swift
+vvm_path = os.path.join("node_modules", "expo-av", "ios", "EXAV", "Video", "VideoViewModule.swift")
+if os.path.exists(vvm_path):
+    try:
+        with open(vvm_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        code_patched = code.replace("resolver: promise.resolver", "resolver: promise.legacyResolver")
+        if code_patched != code:
+            with open(vvm_path, "w", encoding="utf-8") as f:
+                f.write(code_patched)
+            print("Patched VideoViewModule.swift to use promise.legacyResolver")
+    except Exception as e:
+        print(f"Error patching {vvm_path}: {e}")
 
 # 11. Patch ios/Pods for post-pod run
 if os.path.exists("ios"):
