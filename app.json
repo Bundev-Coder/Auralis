@@ -18,7 +18,13 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSAppleMusicUsageDescription": "Auralis needs access to your local media to play your music library."
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "NSAppleMusicUsageDescription": "Auralis needs access to your local media to play your music library.",
+        "NSDocumentsFolderUsageDescription": "Auralis requires access to documents to import and save audio files.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {

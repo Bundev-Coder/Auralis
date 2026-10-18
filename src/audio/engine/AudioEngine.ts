@@ -47,9 +47,13 @@ class AudioEngineClass {
   }
 
   /**
+  private isAudioModeReady = false;
+
+  /**
    * Configure background audio playback and interruption modes
    */
   private async initAudioMode() {
+    if (this.isAudioModeReady) return;
     if (Platform.OS !== 'web') {
       try {
         const { Audio, InterruptionModeIOS, InterruptionModeAndroid } = await import('expo-av');
@@ -62,6 +66,7 @@ class AudioEngineClass {
           interruptionModeIOS: InterruptionModeIOS.DoNotMix,
           interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
         });
+        this.isAudioModeReady = true;
       } catch (err) {
         console.warn('[AudioEngine] Native setAudioModeAsync error:', err);
       }
@@ -70,10 +75,10 @@ class AudioEngineClass {
 
   private async restoreSavedState() {
     try {
-      if (typeof localStorage !== 'undefined') {
-        const savedVolume = localStorage.getItem('auralis_volume');
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        const savedVolume = window.localStorage.getItem('auralis_volume');
         if (savedVolume) this.volume = parseFloat(savedVolume);
-        const savedEq = localStorage.getItem('auralis_eq_preset');
+        const savedEq = window.localStorage.getItem('auralis_eq_preset');
         if (savedEq) this.equalizerPreset = JSON.parse(savedEq);
       }
     } catch {
@@ -221,6 +226,9 @@ class AudioEngineClass {
   private async loadNativeTrack(track: Track, autoPlay: boolean): Promise<void> {
     const { Audio } = await import('expo-av');
 
+    // Ensure audio mode is initialized before loading sound
+    await this.initAudioMode();
+
     // Unload previous sound instance to avoid duplicate instances
     if (this.nativeSound) {
       try {
@@ -248,6 +256,7 @@ class AudioEngineClass {
       this.notifyState();
     } catch (err: any) {
       console.warn('[AudioEngine] loadNativeTrack error:', err);
+      this.nativeSound = null;
       this.error = err.message || 'Cannot load audio source';
       this.isPlaying = false;
       this.isBuffering = false;
@@ -355,8 +364,8 @@ class AudioEngineClass {
   public async setVolume(vol: number): Promise<void> {
     const clamped = Math.max(0, Math.min(1, vol));
     this.volume = clamped;
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('auralis_volume', clamped.toString());
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.setItem('auralis_volume', clamped.toString());
     }
 
     if (Platform.OS === 'web' && this.webAudio) {
@@ -393,8 +402,8 @@ class AudioEngineClass {
     this.equalizerPreset = preset;
     this.equalizerEnabled = enabled;
 
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('auralis_eq_preset', JSON.stringify(preset));
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.setItem('auralis_eq_preset', JSON.stringify(preset));
     }
 
     if (Platform.OS === 'web' && this.webFilters.length > 0) {
@@ -489,8 +498,8 @@ class AudioEngineClass {
 
   private persistRecentTrack(track: Track) {
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('auralis_last_track', JSON.stringify(track));
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        window.localStorage.setItem('auralis_last_track', JSON.stringify(track));
       }
     } catch {
       // ignore

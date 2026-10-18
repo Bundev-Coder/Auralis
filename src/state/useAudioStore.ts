@@ -39,6 +39,8 @@ interface AudioStoreState {
   updateEqualizerBand: (index: number, gainDb: number) => void;
 }
 
+let lastRecordedTrackId: string | null = null;
+
 export const useAudioStore = create<AudioStoreState>((set, get) => {
   // Subscribe to AudioEngine events
   AudioEngine.addListener((engineState: PlaybackState) => {
@@ -55,7 +57,14 @@ export const useAudioStore = create<AudioStoreState>((set, get) => {
     });
 
     if (engineState.currentTrack && engineState.isPlaying) {
-      dbRecordHistory(engineState.currentTrack.id);
+      if (lastRecordedTrackId !== engineState.currentTrack.id) {
+        lastRecordedTrackId = engineState.currentTrack.id;
+        dbRecordHistory(engineState.currentTrack.id).catch((err) => {
+          console.warn('[useAudioStore] dbRecordHistory error:', err);
+        });
+      }
+    } else if (!engineState.isPlaying && !engineState.currentTrack) {
+      lastRecordedTrackId = null;
     }
   });
 
