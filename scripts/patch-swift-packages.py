@@ -49,8 +49,9 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
 
         # Fix JavaScriptRuntime.swift
         if "JavaScriptRuntime.swift" in p:
-            # Fix C++ vector.push_back without consuming: label
-            code = code.replace("vector.push_back(consuming: propNameId)", "vector.push_back(propNameId)")
+            # PropNameID is a move-only C++ type with deleted copy constructor; must use Swift's `consume` operator
+            code = code.replace("vector.push_back(consuming: propNameId)", "vector.push_back(consume propNameId)")
+            code = code.replace("vector.push_back(propNameId)", "vector.push_back(consume propNameId)")
             # Fix immortal reference constructor call via static factory
             code = code.replace(
                 "expo.HostFunctionClosure(context, call, deallocate)",
