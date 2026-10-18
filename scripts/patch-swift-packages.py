@@ -6,6 +6,35 @@ import io
 
 print("=== Running patch-swift-packages.py ===")
 
+# Legacy Expo headers required by older modules (e.g. expo-av) but omitted in Expo SDK 58
+LEGACY_HEADERS = {
+    "EXEventEmitter.h": b"""// Copyright 2018-present 650 Industries. All rights reserved.
+#pragma once
+#import <Foundation/Foundation.h>
+
+@protocol EXEventEmitter <NSObject>
+- (NSArray<NSString *> *)supportedEvents;
+- (void)startObserving;
+- (void)stopObserving;
+@end
+""",
+    "EXEventEmitterService.h": b"""// Copyright 2018-present 650 Industries. All rights reserved.
+#pragma once
+#import <Foundation/Foundation.h>
+
+@protocol EXEventEmitterService <NSObject>
+- (void)sendEventWithName:(NSString *)name body:(id)body;
+@end
+""",
+    "EXLegacyExpoViewProtocol.h": b"""// Copyright 2015-present 650 Industries. All rights reserved.
+#pragma once
+#import <Foundation/Foundation.h>
+
+@protocol EXLegacyExpoViewProtocol <NSObject>
+@end
+"""
+}
+
 # 1. Patch Package.swift files for tools version and trailing commas
 count_pkg = 0
 for p in glob.glob("node_modules/**/Package.swift", recursive=True):
@@ -87,15 +116,19 @@ if os.path.exists(jsiu_path):
     except Exception as e:
         print(f"Error patching {jsiu_path}: {e}")
 
-# 5. Patch prebuilt XCFramework tarballs in node_modules to downgrade Swift 6.3 compiler requirement to 6.1
-# and replace unknown @_Concurrency.MainActor with @MainActor
+# 5. Patch prebuilt XCFramework tarballs in node_modules to downgrade Swift 6.3 compiler requirement to 6.1,
+# replace unknown @_Concurrency.MainActor with @MainActor, and inject missing legacy Expo headers.
 count_tar = 0
 for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=True):
     try:
         modified = False
+        is_expo_modules_core = "ExpoModulesCore" in tar_path
         with tarfile.open(tar_path, "r:gz") as tar:
             members = tar.getmembers()
+            existing_names = {m.name for m in members}
+            header_dirs = set()
             new_tar_io = io.BytesIO()
+
             with tarfile.open(fileobj=new_tar_io, mode="w:gz") as new_tar:
                 for member in members:
                     f = tar.extractfile(member)
@@ -114,10 +147,44 @@ for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=Tru
                             if content != orig:
                                 modified = True
                                 data = content.encode("utf-8")
+
+                        if is_expo_modules_core:
+                            if member.name.endswith(".h"):
+                                header_dirs.add(os.path.dirname(member.name).replace("\\", "/"))
+
+                            if member.name.endswith("ExpoModulesCore_umbrella.h"):
+                                content = data.decode("utf-8", errors="ignore")
+                                if "EXEventEmitter.h" not in content:
+                                    content += '\n#import "EXEventEmitter.h"\n#import "EXEventEmitterService.h"\n#import "EXLegacyExpoViewProtocol.h"\n'
+                                    data = content.encode("utf-8")
+                                    modified = True
+
+                            if member.name.endswith("ExpoModulesCore.h"):
+                                content = data.decode("utf-8", errors="ignore")
+                                if "EXEventEmitter.h" not in content:
+                                    content += '\n#import <ExpoModulesCore/EXEventEmitter.h>\n#import <ExpoModulesCore/EXEventEmitterService.h>\n#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>\n'
+                                    data = content.encode("utf-8")
+                                    modified = True
+
                         member.size = len(data)
                         new_tar.addfile(member, io.BytesIO(data))
                     else:
                         new_tar.addfile(member)
+
+                # Inject legacy headers into all header directories inside ExpoModulesCore tarballs
+                if is_expo_modules_core and header_dirs:
+                    for hdir in header_dirs:
+                        for fname, fbytes in LEGACY_HEADERS.items():
+                            fpath = f"{hdir}/{fname}".replace("\\", "/")
+                            if fpath not in existing_names:
+                                ti = tarfile.TarInfo(name=fpath)
+                                ti.size = len(fbytes)
+                                ti.mtime = 1700000000
+                                ti.mode = 0o644
+                                new_tar.addfile(ti, io.BytesIO(fbytes))
+                                modified = True
+                                print(f"Injected {fname} into tarball dir {hdir}")
+
         if modified:
             with open(tar_path, "wb") as f:
                 f.write(new_tar_io.getvalue())
@@ -179,9 +246,6 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
 
         # Fix JavaScriptRuntime.swift
         if "JavaScriptRuntime.swift" in p:
-            # PropNameID is a move-only C++ type with deleted copy constructor.
-            # Swift's vector.push_back calls the deleted copy constructor.
-            # Replace with expo.HostObjectCallbacks.appendPropNameId using C++ emplace_back.
             code = re.sub(
                 r"for\s+propertyName\s+in\s+propertyNames\s*\{[\s\S]*?vector\.push_back\([^\)]*\)\s*\}",
                 """for propertyName in propertyNames {
@@ -189,7 +253,6 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
       }""",
                 code
             )
-            # Fix immortal reference constructor call via static factory
             code = code.replace(
                 "expo.HostFunctionClosure(context, call, deallocate)",
                 "expo.HostFunctionClosure.create(context, call, deallocate)"
@@ -225,5 +288,147 @@ if os.path.exists(bf_path):
             print("Patched build-xcframework.sh to remove -quiet")
     except Exception as e:
         print(f"Error patching {bf_path}: {e}")
+
+# 9. Provide legacy Expo headers in expo-modules-core directories
+emc_dirs = [
+    os.path.join("node_modules", "expo-modules-core", "ios"),
+    os.path.join("node_modules", "expo-modules-core", "ios", "Legacy"),
+    os.path.join("node_modules", "expo-modules-core", "ios", "Legacy", "Services"),
+    os.path.join("node_modules", "expo-modules-core", "ios", "Legacy", "Protocols"),
+    os.path.join("node_modules", "expo-modules-core", "ios", "ExpoModulesCore"),
+]
+for d in emc_dirs:
+    if os.path.exists(d):
+        for fname, fbytes in LEGACY_HEADERS.items():
+            fpath = os.path.join(d, fname)
+            try:
+                with open(fpath, "wb") as f:
+                    f.write(fbytes)
+                print(f"Wrote legacy header: {fpath}")
+            except Exception as e:
+                print(f"Error writing {fpath}: {e}")
+
+# 10. Patch expo-av source files and provide fallback legacy headers
+av_dirs = [
+    os.path.join("node_modules", "expo-av", "ios", "EXAV"),
+    os.path.join("node_modules", "expo-av", "ios", "EXAV", "Video"),
+]
+for d in av_dirs:
+    if os.path.exists(d):
+        for fname, fbytes in LEGACY_HEADERS.items():
+            fpath = os.path.join(d, fname)
+            try:
+                with open(fpath, "wb") as f:
+                    f.write(fbytes)
+                print(f"Wrote fallback header: {fpath}")
+            except Exception as e:
+                print(f"Error writing {fpath}: {e}")
+
+# Patch EXAV.h
+exav_h = os.path.join("node_modules", "expo-av", "ios", "EXAV", "EXAV.h")
+if os.path.exists(exav_h):
+    try:
+        with open(exav_h, "r", encoding="utf-8") as f:
+            code = f.read()
+        code_patched = code.replace(
+            "#import <ExpoModulesCore/EXEventEmitter.h>",
+            """#if __has_include(<ExpoModulesCore/EXEventEmitter.h>)
+#import <ExpoModulesCore/EXEventEmitter.h>
+#else
+#import "EXEventEmitter.h"
+#endif"""
+        )
+        if code_patched != code:
+            with open(exav_h, "w", encoding="utf-8") as f:
+                f.write(code_patched)
+            print("Patched EXAV.h with conditional EXEventEmitter import")
+    except Exception as e:
+        print(f"Error patching {exav_h}: {e}")
+
+# Patch EXAV.m and EXAVTV.m
+for m_path in [
+    os.path.join("node_modules", "expo-av", "ios", "EXAV", "EXAV.m"),
+    os.path.join("node_modules", "expo-av", "ios", "EXAV", "EXAVTV.m"),
+]:
+    if os.path.exists(m_path):
+        try:
+            with open(m_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            code_patched = code.replace(
+                "#import <ExpoModulesCore/EXEventEmitterService.h>",
+                """#if __has_include(<ExpoModulesCore/EXEventEmitterService.h>)
+#import <ExpoModulesCore/EXEventEmitterService.h>
+#else
+#import "EXEventEmitterService.h"
+#endif"""
+            )
+            if code_patched != code:
+                with open(m_path, "w", encoding="utf-8") as f:
+                    f.write(code_patched)
+                print(f"Patched {m_path} with conditional EXEventEmitterService import")
+        except Exception as e:
+            print(f"Error patching {m_path}: {e}")
+
+# Patch Video/EXVideoView.h
+vv_h = os.path.join("node_modules", "expo-av", "ios", "EXAV", "Video", "EXVideoView.h")
+if os.path.exists(vv_h):
+    try:
+        with open(vv_h, "r", encoding="utf-8") as f:
+            code = f.read()
+        code_patched = code.replace(
+            "#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>",
+            """#if __has_include(<ExpoModulesCore/EXLegacyExpoViewProtocol.h>)
+#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>
+#else
+#import "EXLegacyExpoViewProtocol.h"
+#endif"""
+        )
+        if code_patched != code:
+            with open(vv_h, "w", encoding="utf-8") as f:
+                f.write(code_patched)
+            print("Patched EXVideoView.h with conditional EXLegacyExpoViewProtocol import")
+    except Exception as e:
+        print(f"Error patching {vv_h}: {e}")
+
+# 11. Patch ios/Pods for post-pod run
+if os.path.exists("ios"):
+    for root, dirs, files in os.walk("ios"):
+        r_norm = root.replace("\\", "/")
+        if "ExpoModulesCore" in r_norm and (r_norm.endswith("Headers") or r_norm.endswith("Headers/ExpoModulesCore") or "ExpoModulesCore.framework/Headers" in r_norm):
+            for fname, fbytes in LEGACY_HEADERS.items():
+                dest = os.path.join(root, fname)
+                try:
+                    with open(dest, "wb") as f:
+                        f.write(fbytes)
+                    print(f"Wrote {fname} into Pods header dir: {dest}")
+                except Exception as e:
+                    print(f"Error writing to Pods {dest}: {e}")
+
+        for f in files:
+            if f == "ExpoModulesCore_umbrella.h":
+                p = os.path.join(root, f)
+                try:
+                    with open(p, "r", encoding="utf-8") as hf:
+                        ucode = hf.read()
+                    if "EXEventEmitter.h" not in ucode:
+                        ucode += '\n#import "EXEventEmitter.h"\n#import "EXEventEmitterService.h"\n#import "EXLegacyExpoViewProtocol.h"\n'
+                        with open(p, "w", encoding="utf-8") as hf:
+                            hf.write(ucode)
+                        print(f"Patched Pods umbrella header: {p}")
+                except Exception as e:
+                    print(f"Error patching {p}: {e}")
+
+            elif f == "ExpoModulesCore.h":
+                p = os.path.join(root, f)
+                try:
+                    with open(p, "r", encoding="utf-8") as hf:
+                        ucode = hf.read()
+                    if "EXEventEmitter.h" not in ucode:
+                        ucode += '\n#import <ExpoModulesCore/EXEventEmitter.h>\n#import <ExpoModulesCore/EXEventEmitterService.h>\n#import <ExpoModulesCore/EXLegacyExpoViewProtocol.h>\n'
+                        with open(p, "w", encoding="utf-8") as hf:
+                            hf.write(ucode)
+                        print(f"Patched Pods ExpoModulesCore.h: {p}")
+                except Exception as e:
+                    print(f"Error patching {p}: {e}")
 
 print("=== Patching completed successfully ===")
