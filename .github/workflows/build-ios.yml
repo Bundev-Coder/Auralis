@@ -112,6 +112,7 @@ jobs:
 
       - name: Create or Update GitHub Release with IPA
         run: |
-          gh release create v1.0.0 ios/Auralis.ipa --title "Auralis iOS v1.0.0" --notes "Pre-built unsigned IPA package for Auralis iOS. Sideloadable via Sideloadly, AltStore, TrollStore, or Scarlet." --clobber
+          gh release delete v1.0.0 --yes || true
+          gh release create v1.0.0 ios/Auralis.ipa --title "Auralis iOS v1.0.0" --notes "Pre-built unsigned IPA package for Auralis iOS. Sideloadable via Sideloadly, AltStore, TrollStore, or Scarlet."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
