@@ -1,0 +1,60 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prebuild native iOS project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Setup CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Build iOS Archive & Package IPA
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace Auralis.xcworkspace \
+            -scheme Auralis \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/Auralis.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+          # Package Payload into unsigned .ipa for sideloading / AltStore / Sideloadly
+          mkdir -p build/Payload
+          cp -r build/Auralis.xcarchive/Products/Applications/Auralis.app build/Payload/
+          cd build
+          zip -r Auralis.ipa Payload
+          cd ..
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Auralis-iOS-IPA
+          path: ios/build/Auralis.ipa
+          retention-days: 14
