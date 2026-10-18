@@ -109,6 +109,8 @@ for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=Tru
                             content = content.replace("-interface-compiler-version 6.3.1", "-interface-compiler-version 6.1.2")
                             content = content.replace("-interface-compiler-version 6.3", "-interface-compiler-version 6.1.2")
                             content = content.replace("@_Concurrency.MainActor", "@MainActor")
+                            content = content.replace("extension UIKit.UIView : @MainActor ExpoModulesCore.AnyArgument {", "extension UIKit.UIView : ExpoModulesCore.AnyArgument {")
+                            content = content.replace("extension UIKit.UIView : @_Concurrency.MainActor ExpoModulesCore.AnyArgument {", "extension UIKit.UIView : ExpoModulesCore.AnyArgument {")
                             if content != orig:
                                 modified = True
                                 data = content.encode("utf-8")
@@ -128,7 +130,8 @@ print(f"Total prebuild tarballs patched: {count_tar}")
 
 # 6. Patch extracted .swiftinterface files in repo (e.g. in ios/Pods/ or XCFrameworks)
 count_si = 0
-for si_path in glob.glob("**/*.swiftinterface", recursive=True):
+all_si_files = set(glob.glob("**/*.swiftinterface", recursive=True) + glob.glob("ios/**/*.swiftinterface", recursive=True) + glob.glob("node_modules/**/*.swiftinterface", recursive=True))
+for si_path in all_si_files:
     try:
         with open(si_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -138,6 +141,8 @@ for si_path in glob.glob("**/*.swiftinterface", recursive=True):
         content = content.replace("-interface-compiler-version 6.3.1", "-interface-compiler-version 6.1.2")
         content = content.replace("-interface-compiler-version 6.3", "-interface-compiler-version 6.1.2")
         content = content.replace("@_Concurrency.MainActor", "@MainActor")
+        content = content.replace("extension UIKit.UIView : @MainActor ExpoModulesCore.AnyArgument {", "extension UIKit.UIView : ExpoModulesCore.AnyArgument {")
+        content = content.replace("extension UIKit.UIView : @_Concurrency.MainActor ExpoModulesCore.AnyArgument {", "extension UIKit.UIView : ExpoModulesCore.AnyArgument {")
         if content != orig:
             with open(si_path, "w", encoding="utf-8") as f:
                 f.write(content)
