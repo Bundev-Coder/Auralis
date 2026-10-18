@@ -74,6 +74,10 @@ jobs:
           cd ios
           pod install
 
+      - name: Post-Pod Patching for Swift Interfaces
+        run: |
+          python3 scripts/patch-swift-packages.py
+
       - name: Build iOS App without Signing
         run: |
           cd ios

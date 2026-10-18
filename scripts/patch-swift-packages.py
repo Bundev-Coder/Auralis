@@ -1,6 +1,10 @@
 import os
 import glob
 import re
+import tarfile
+import io
+
+print("=== Running patch-swift-packages.py ===")
 
 # 1. Patch Package.swift files for tools version and trailing commas
 count_pkg = 0
@@ -83,7 +87,68 @@ if os.path.exists(jsiu_path):
     except Exception as e:
         print(f"Error patching {jsiu_path}: {e}")
 
-# 5. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
+# 5. Patch prebuilt XCFramework tarballs in node_modules to downgrade Swift 6.3 compiler requirement to 6.1
+# and replace unknown @_Concurrency.MainActor with @MainActor
+count_tar = 0
+for tar_path in glob.glob("node_modules/**/prebuilds/**/*.tar.gz", recursive=True):
+    try:
+        modified = False
+        with tarfile.open(tar_path, "r:gz") as tar:
+            members = tar.getmembers()
+            new_tar_io = io.BytesIO()
+            with tarfile.open(fileobj=new_tar_io, mode="w:gz") as new_tar:
+                for member in members:
+                    f = tar.extractfile(member)
+                    if f is not None:
+                        data = f.read()
+                        if member.name.endswith(".swiftinterface"):
+                            content = data.decode("utf-8", errors="ignore")
+                            orig = content
+                            content = content.replace("Apple Swift version 6.3.1 (swiftlang-6.3.1.1.2 clang-2100.0.123.102)", "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)")
+                            content = content.replace("Apple Swift version 6.3", "Apple Swift version 6.1.2")
+                            content = content.replace("-interface-compiler-version 6.3.1", "-interface-compiler-version 6.1.2")
+                            content = content.replace("-interface-compiler-version 6.3", "-interface-compiler-version 6.1.2")
+                            content = content.replace("@_Concurrency.MainActor", "@MainActor")
+                            if content != orig:
+                                modified = True
+                                data = content.encode("utf-8")
+                        member.size = len(data)
+                        new_tar.addfile(member, io.BytesIO(data))
+                    else:
+                        new_tar.addfile(member)
+        if modified:
+            with open(tar_path, "wb") as f:
+                f.write(new_tar_io.getvalue())
+            print(f"Patched prebuild tarball: {tar_path}")
+            count_tar += 1
+    except Exception as e:
+        print(f"Error patching tarball {tar_path}: {e}")
+
+print(f"Total prebuild tarballs patched: {count_tar}")
+
+# 6. Patch extracted .swiftinterface files in repo (e.g. in ios/Pods/ or XCFrameworks)
+count_si = 0
+for si_path in glob.glob("**/*.swiftinterface", recursive=True):
+    try:
+        with open(si_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        orig = content
+        content = content.replace("Apple Swift version 6.3.1 (swiftlang-6.3.1.1.2 clang-2100.0.123.102)", "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)")
+        content = content.replace("Apple Swift version 6.3", "Apple Swift version 6.1.2")
+        content = content.replace("-interface-compiler-version 6.3.1", "-interface-compiler-version 6.1.2")
+        content = content.replace("-interface-compiler-version 6.3", "-interface-compiler-version 6.1.2")
+        content = content.replace("@_Concurrency.MainActor", "@MainActor")
+        if content != orig:
+            with open(si_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"Patched standalone swiftinterface: {si_path}")
+            count_si += 1
+    except Exception as e:
+        print(f"Error patching swiftinterface {si_path}: {e}")
+
+print(f"Total standalone swiftinterfaces patched: {count_si}")
+
+# 7. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
 count_swift = 0
 for p in glob.glob("node_modules/**/*.swift", recursive=True):
     try:
@@ -142,7 +207,7 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
 
 print(f"Total Swift source files patched: {count_swift}")
 
-# 6. Remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
+# 8. Remove -quiet from expo-modules-jsi build-xcframework.sh for clear build logs
 bf_path = os.path.join("node_modules", "expo-modules-jsi", "apple", "scripts", "build-xcframework.sh")
 if os.path.exists(bf_path):
     try:
@@ -155,3 +220,5 @@ if os.path.exists(bf_path):
             print("Patched build-xcframework.sh to remove -quiet")
     except Exception as e:
         print(f"Error patching {bf_path}: {e}")
+
+print("=== Patching completed successfully ===")
