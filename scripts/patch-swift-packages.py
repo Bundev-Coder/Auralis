@@ -57,12 +57,12 @@ LEGACY_MACROS = """
 #define EXLogError(format, ...) NSLog((@"[Expo Error] " format), ##__VA_ARGS__)
 #endif
 
-#ifndef UMPromiseResolveBlock
-typedef EXPromiseResolveBlock UMPromiseResolveBlock;
-#endif
-
-#ifndef UMPromiseRejectBlock
-typedef EXPromiseRejectBlock UMPromiseRejectBlock;
+#ifndef EXPromiseResolveBlock_DEFINED
+#define EXPromiseResolveBlock_DEFINED 1
+typedef void (^EXPromiseResolveBlock)(id result);
+typedef void (^EXPromiseRejectBlock)(NSString *code, NSString *message, NSError *error);
+typedef void (^UMPromiseResolveBlock)(id result);
+typedef void (^UMPromiseRejectBlock)(NSString *code, NSString *message, NSError *error);
 #endif
 """
 
@@ -389,6 +389,8 @@ exav_src_files = [
     "EXAVPlayerData.m",
     "EXAVPlayerData.h",
     "EXAVTV.m",
+    os.path.join("Video", "EXVideoView.h"),
+    os.path.join("Video", "EXVideoView.m"),
 ]
 for fname in exav_src_files:
     p = os.path.join("node_modules", "expo-av", "ios", "EXAV", fname)
