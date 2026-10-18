@@ -579,4 +579,22 @@ for vvm_path in [
         except Exception as e:
             print(f"Error patching {vvm_path}: {e}")
 
+# Patch AudioModule.swift in expo-audio to bypass legacyResolver / legacyRejecter
+for am_path in [
+    os.path.join("node_modules", "expo-audio", "ios", "AudioModule.swift"),
+    os.path.join("ios", "Pods", "ExpoAudio", "ios", "AudioModule.swift"),
+]:
+    if os.path.exists(am_path):
+        try:
+            with open(am_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            code_patched = code.replace("resolve: promise.legacyResolver,", "resolve: { res in promise.resolve(res) },")
+            code_patched = code_patched.replace("reject: promise.legacyRejecter", 'reject: { code, desc, _ in promise.reject(code ?? "ERR", desc ?? "") }')
+            if code_patched != code:
+                with open(am_path, "w", encoding="utf-8") as f:
+                    f.write(code_patched)
+                print(f"Patched {am_path} to direct promise closures")
+        except Exception as e:
+            print(f"Error patching {am_path}: {e}")
+
 print("=== Patching completed successfully ===")
