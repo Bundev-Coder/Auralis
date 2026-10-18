@@ -260,7 +260,8 @@ print(f"Total standalone swiftinterfaces patched: {count_si}")
 
 # 7. Patch Swift source files for Sendable conformance, weak var, Task.immediate, and C++ interop
 count_swift = 0
-for p in glob.glob("node_modules/**/*.swift", recursive=True):
+all_swift_files = set(glob.glob("node_modules/**/*.swift", recursive=True) + glob.glob("ios/**/*.swift", recursive=True))
+for p in all_swift_files:
     try:
         with open(p, "r", encoding="utf-8") as f:
             code = f.read()
@@ -294,6 +295,17 @@ for p in glob.glob("node_modules/**/*.swift", recursive=True):
             code = code.replace(
                 "expo.HostFunctionClosure(context, call, deallocate)",
                 "expo.HostFunctionClosure.create(context, call, deallocate)"
+            )
+            # Fix runtime crash: borrowed pointer must not be moved out (.move() destroys C++ jsi::Value memory owned by caller)
+            code = re.sub(
+                r"let\s+this\s*=\s*UnsafeMutablePointer\(mutating:\s*thisPtr(?:\.value)?\)\.move\(\)\s*\n\s*let\s+arguments\s*=\s*JavaScriptValuesBuffer\(runtime,\s*start:\s*argumentsPtr(?:\.value)?,\s*count:\s*argumentsCount\)\s*\n\s*let\s+thisValue\s*=\s*JavaScriptValue\(runtime,\s*this\)",
+                "let arguments = JavaScriptValuesBuffer(runtime, start: argumentsPtr.value, count: argumentsCount)\n          let thisValue = JavaScriptValue(runtime, copying: thisPtr.value.pointee)",
+                code
+            )
+            code = re.sub(
+                r"let\s+value\s*=\s*JavaScriptValue\(runtime,\s*valuePointer\.assumingMemoryBound\(to:\s*facebook\.jsi\.Value\.self\)\.move\(\)\)",
+                "let value = JavaScriptValue(runtime, copying: valuePointer.assumingMemoryBound(to: facebook.jsi.Value.self).pointee)",
+                code
             )
 
         # Fix JavaScriptError.swift SILGen crash in Swift 6.1 (Xcode 16.4)

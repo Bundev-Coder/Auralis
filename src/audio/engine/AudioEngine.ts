@@ -231,20 +231,28 @@ class AudioEngineClass {
       this.nativeSound = null;
     }
 
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: track.sourceUri },
-      {
-        shouldPlay: autoPlay,
-        volume: this.volume,
-        rate: this.playbackRate,
-      },
-      this.onNativeStatusUpdate
-    );
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: track.sourceUri },
+        {
+          shouldPlay: autoPlay,
+          volume: this.volume,
+          rate: this.playbackRate,
+        },
+        this.onNativeStatusUpdate
+      );
 
-    this.nativeSound = sound;
-    this.isPlaying = autoPlay;
-    this.isBuffering = false;
-    this.notifyState();
+      this.nativeSound = sound;
+      this.isPlaying = autoPlay;
+      this.isBuffering = false;
+      this.notifyState();
+    } catch (err: any) {
+      console.warn('[AudioEngine] loadNativeTrack error:', err);
+      this.error = err.message || 'Cannot load audio source';
+      this.isPlaying = false;
+      this.isBuffering = false;
+      this.notifyState();
+    }
   }
 
   private onNativeStatusUpdate = (status: any) => {
@@ -287,9 +295,13 @@ class AudioEngineClass {
         this.notifyState();
       }
     } else if (this.nativeSound) {
-      await this.nativeSound.playAsync();
-      this.isPlaying = true;
-      this.notifyState();
+      try {
+        await this.nativeSound.playAsync();
+        this.isPlaying = true;
+        this.notifyState();
+      } catch (e) {
+        console.warn('[AudioEngine] Native play error:', e);
+      }
     }
   }
 
@@ -306,9 +318,13 @@ class AudioEngineClass {
         this.notifyState();
       }
     } else if (this.nativeSound) {
-      await this.nativeSound.pauseAsync();
-      this.isPlaying = false;
-      this.notifyState();
+      try {
+        await this.nativeSound.pauseAsync();
+        this.isPlaying = false;
+        this.notifyState();
+      } catch (e) {
+        console.warn('[AudioEngine] Native pause error:', e);
+      }
     }
   }
 
@@ -328,7 +344,11 @@ class AudioEngineClass {
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.currentTime = clamped;
     } else if (this.nativeSound) {
-      await this.nativeSound.setPositionAsync(clamped * 1000);
+      try {
+        await this.nativeSound.setPositionAsync(clamped * 1000);
+      } catch (e) {
+        console.warn('[AudioEngine] Native seek error:', e);
+      }
     }
   }
 
@@ -342,7 +362,11 @@ class AudioEngineClass {
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.volume = clamped;
     } else if (this.nativeSound) {
-      await this.nativeSound.setVolumeAsync(clamped);
+      try {
+        await this.nativeSound.setVolumeAsync(clamped);
+      } catch (e) {
+        console.warn('[AudioEngine] Native setVolume error:', e);
+      }
     }
     this.notifyState();
   }
@@ -354,7 +378,11 @@ class AudioEngineClass {
     if (Platform.OS === 'web' && this.webAudio) {
       this.webAudio.playbackRate = clamped;
     } else if (this.nativeSound) {
-      await this.nativeSound.setRateAsync(clamped, true);
+      try {
+        await this.nativeSound.setRateAsync(clamped, true);
+      } catch (e) {
+        console.warn('[AudioEngine] Native setRate error:', e);
+      }
     }
     this.notifyState();
   }
@@ -418,9 +446,14 @@ class AudioEngineClass {
   // ----------------- LOCK SCREEN / MEDIA SESSION -----------------
 
   private updateMediaSession(track: Track) {
-    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+    if (
+      Platform.OS === 'web' &&
+      typeof navigator !== 'undefined' &&
+      'mediaSession' in navigator &&
+      typeof (window as any).MediaMetadata !== 'undefined'
+    ) {
       try {
-        navigator.mediaSession.metadata = new MediaMetadata({
+        navigator.mediaSession.metadata = new (window as any).MediaMetadata({
           title: track.title,
           artist: track.artist,
           album: track.album || APP_CONFIG.appName,
