@@ -17,26 +17,41 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16 & Accept License
+      - name: Detect and Select Xcode with iOS Platform
         run: |
-          XCODE_DEV_DIR="/Applications/Xcode_16.2.app/Contents/Developer"
-          if [ ! -d "$XCODE_DEV_DIR" ]; then
-            XCODE_DEV_DIR="/Applications/Xcode_16.1.app/Contents/Developer"
-          fi
-          if [ ! -d "$XCODE_DEV_DIR" ]; then
-            XCODE_DEV_DIR="/Applications/Xcode_16.app/Contents/Developer"
-          fi
-          sudo xcode-select -s "$XCODE_DEV_DIR"
-          echo "DEVELOPER_DIR=$XCODE_DEV_DIR" >> $GITHUB_ENV
+          echo "=== Initial Default Developer Dir ==="
+          xcode-select -p
           xcodebuild -version
+
+          echo "=== Installed Xcode Applications ==="
+          ls -d /Applications/Xcode*.app || true
+
+          echo "=== Check Simctl Runtimes on Default Xcode ==="
+          xcrun simctl list runtimes || true
+
+          # If the current default Xcode doesn't have an iOS runtime, look for one that does
+          if ! xcrun simctl list runtimes 2>/dev/null | grep -q "iOS"; then
+            echo "Default Xcode missing iOS runtime. Searching installed Xcode versions..."
+            for app in /Applications/Xcode*.app; do
+              echo "Testing $app..."
+              if DEVELOPER_DIR="$app/Contents/Developer" xcrun simctl list runtimes 2>/dev/null | grep -q "iOS"; then
+                echo "Switching to $app which provides iOS runtime!"
+                sudo xcode-select -s "$app/Contents/Developer"
+                echo "DEVELOPER_DIR=$app/Contents/Developer" >> $GITHUB_ENV
+                break
+              fi
+            done
+          else
+            echo "Default Xcode already provides iOS runtime."
+            echo "DEVELOPER_DIR=$(xcode-select -p)" >> $GITHUB_ENV
+          fi
+
+          echo "=== Final Active Xcode ==="
+          xcode-select -p
+          xcodebuild -version
+          xcrun simctl list runtimes || true
           sudo xcodebuild -license accept || true
           sudo xcodebuild -runFirstLaunch || true
-
-      - name: Download iOS Platform Runtime
-        run: |
-          echo "Checking and downloading iOS platform runtime for Xcode 16..."
-          sudo xcodebuild -downloadPlatform iOS
-          xcrun simctl list runtimes
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Patch Package.swift Swift Tools Version & Trailing Commas for Xcode 16.2
+      - name: Patch Swift Packages & Build Scripts
         run: |
           python3 scripts/patch-swift-packages.py
 
@@ -77,11 +92,11 @@ jobs:
           mkdir -p Payload
           APP_PATH=$(find build/Build/Products -name "Auralis.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
-            echo "::error::Auralis.app was not produced!"
+            echo "::error::Auralis.app was not produced in build directory!"
             exit 1
           fi
           echo "Packaging $APP_PATH into IPA..."
-          cp -r "$APP_PATH" Payload/
+          cp -R "$APP_PATH" Payload/
           zip -r Auralis.ipa Payload
 
       - name: Upload IPA Artifact
@@ -93,6 +108,6 @@ jobs:
 
       - name: Create or Update GitHub Release with IPA
         run: |
-          gh release create v1.0.0 ios/Auralis.ipa --title "Auralis iOS v1.0.0" --notes "Pre-built unsigned IPA package for iOS. Sideloadable via Sideloadly, AltStore, TrollStore, or Scarlet." --clobber
+          gh release create v1.0.0 ios/Auralis.ipa --title "Auralis iOS v1.0.0" --notes "Pre-built unsigned IPA package for Auralis iOS. Sideloadable via Sideloadly, AltStore, TrollStore, or Scarlet." --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
